@@ -3,7 +3,9 @@ from time import perf_counter
 from connectors.binance import BinanceConnector
 from connectors.bybit import BybitConnector
 from connectors.okx import OKXConnector
+
 from engine.spread_calculator import SpreadCalculator
+from reporting.csv_report import CSVReport
 
 
 class Scanner:
@@ -15,6 +17,7 @@ class Scanner:
         self.okx = OKXConnector()
 
         self.calculator = SpreadCalculator()
+        self.csv_report = CSVReport()
 
     def load_all_markets(self):
 
@@ -44,22 +47,32 @@ class Scanner:
 
         common_pairs = (
             set(self.binance_markets.keys())
-            & set(self.bybit_markets.keys())
-            & set(self.okx_markets.keys())
+            &
+            set(self.bybit_markets.keys())
+            &
+            set(self.okx_markets.keys())
         )
 
-        return sorted(
-            pair
-            for pair in common_pairs
-            if pair.endswith("/USDT") and ":" not in pair
-        )
+        filtered = []
+
+        for pair in common_pairs:
+
+            if ":" in pair:
+                continue
+
+            if not pair.endswith("/USDT"):
+                continue
+
+            filtered.append(pair)
+
+        return sorted(filtered)
 
     def get_prices(self, pair):
 
         return {
             "Binance": self.binance_prices.get(pair),
             "Bybit": self.bybit_prices.get(pair),
-            "OKX": self.okx_prices.get(pair),
+            "OKX": self.okx_prices.get(pair)
         }
 
     def scan(self):
@@ -81,7 +94,10 @@ class Scanner:
 
             prices = self.get_prices(pair)
 
-            opportunity = self.calculator.calculate(pair, prices)
+            opportunity = self.calculator.calculate(
+                pair,
+                prices
+            )
 
             if opportunity:
                 opportunities.append(opportunity)
@@ -105,10 +121,13 @@ class Scanner:
                 f"{opportunity.percent:.5f}%"
             )
 
+        csv_file = self.csv_report.save(opportunities)
+
         end = perf_counter()
 
         print("=" * 60)
         print(f"Scanned pairs : {len(common_pairs)}")
         print(f"Found spreads : {len(opportunities)}")
         print(f"Execution time: {end-start:.2f} sec")
+        print(f"CSV saved     : {csv_file}")
         print("=" * 60)
