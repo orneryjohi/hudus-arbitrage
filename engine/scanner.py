@@ -1,7 +1,9 @@
+from time import perf_counter
+
 from connectors.binance import BinanceConnector
 from connectors.bybit import BybitConnector
 from connectors.okx import OKXConnector
-from models.opportunity import Opportunity
+from engine.spread_calculator import SpreadCalculator
 
 
 class Scanner:
@@ -11,6 +13,8 @@ class Scanner:
         self.binance = BinanceConnector()
         self.bybit = BybitConnector()
         self.okx = OKXConnector()
+
+        self.calculator = SpreadCalculator()
 
     def load_all_markets(self):
 
@@ -38,99 +42,48 @@ class Scanner:
 
     def get_common_pairs(self):
 
-        binance_pairs = set(self.binance_markets.keys())
-        bybit_pairs = set(self.bybit_markets.keys())
-        okx_pairs = set(self.okx_markets.keys())
-
         common_pairs = (
-            binance_pairs
-            & bybit_pairs
-            & okx_pairs
+            set(self.binance_markets.keys())
+            & set(self.bybit_markets.keys())
+            & set(self.okx_markets.keys())
         )
 
-        filtered = []
-
-        for pair in common_pairs:
-
-            if ":" in pair:
-                continue
-
-            if not pair.endswith("/USDT"):
-                continue
-
-            filtered.append(pair)
-
-        return sorted(filtered)
+        return sorted(
+            pair
+            for pair in common_pairs
+            if pair.endswith("/USDT") and ":" not in pair
+        )
 
     def get_prices(self, pair):
 
-        prices = {}
-
-        prices["Binance"] = self.binance_prices.get(pair)
-        prices["Bybit"] = self.bybit_prices.get(pair)
-        prices["OKX"] = self.okx_prices.get(pair)
-
-        return prices
-
-    def find_opportunity(self, pair):
-
-        prices = self.get_prices(pair)
-
-        valid_prices = {
-            exchange: price
-            for exchange, price in prices.items()
-            if price is not None
+        return {
+            "Binance": self.binance_prices.get(pair),
+            "Bybit": self.bybit_prices.get(pair),
+            "OKX": self.okx_prices.get(pair),
         }
-
-        if len(valid_prices) < 2:
-            return None
-
-        buy_exchange = min(valid_prices, key=valid_prices.get)
-        sell_exchange = max(valid_prices, key=valid_prices.get)
-
-        buy_price = valid_prices[buy_exchange]
-        sell_price = valid_prices[sell_exchange]
-
-        difference = sell_price - buy_price
-        percent = (difference / buy_price) * 100
-
-        if percent > 5:
-            return None
-
-        return Opportunity(
-            pair,
-            prices,
-            buy_exchange,
-            sell_exchange,
-            buy_price,
-            sell_price,
-            difference,
-            percent
-        )
 
     def scan(self):
 
-        print("=" * 40)
+        start = perf_counter()
+
+        print("=" * 60)
         print("Hudus Arbitrage Scanner")
-        print("=" * 40)
+        print("=" * 60)
 
         self.load_all_markets()
         self.load_all_prices()
 
         common_pairs = self.get_common_pairs()
 
-        print()
-        print("-" * 40)
-        print(f"Common Spot USDT pairs : {len(common_pairs)}")
-        print("-" * 40)
-
         opportunities = []
 
         for pair in common_pairs:
 
-            opportunity = self.find_opportunity(pair)
+            prices = self.get_prices(pair)
 
-            if opportunity is not None:
+            opportunity = self.calculator.calculate(pair, prices)
+
+            if opportunity:
                 opportunities.append(opportunity)
 
         opportunities.sort(
@@ -139,24 +92,23 @@ class Scanner:
         )
 
         print()
-        print("=" * 40)
-        print("TOP 20 SPREADS")
-        print("=" * 40)
+        print("=" * 60)
+        print(f"{'PAIR':<18}{'BUY':<12}{'SELL':<12}{'SPREAD'}")
+        print("=" * 60)
 
         for opportunity in opportunities[:20]:
 
-            print()
-
-            print(opportunity.pair)
-
             print(
-                f"BUY  : {opportunity.buy_exchange:<8} {opportunity.buy_price}"
+                f"{opportunity.pair:<18}"
+                f"{opportunity.buy_exchange:<12}"
+                f"{opportunity.sell_exchange:<12}"
+                f"{opportunity.percent:.5f}%"
             )
 
-            print(
-                f"SELL : {opportunity.sell_exchange:<8} {opportunity.sell_price}"
-            )
+        end = perf_counter()
 
-            print(
-                f"SPREAD : {opportunity.percent:.5f}%"
-            )
+        print("=" * 60)
+        print(f"Scanned pairs : {len(common_pairs)}")
+        print(f"Found spreads : {len(opportunities)}")
+        print(f"Execution time: {end-start:.2f} sec")
+        print("=" * 60)
